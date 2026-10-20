@@ -25,6 +25,7 @@
   --f11:#7aa9de; --f12:#b49be8; --f15:#e4a64a; --f21:#ec8578;
   --ok:#6fd39a; --ok-bg:#173426; --pc0:#6aaee8;--pc1:#f2905a;--pc2:#5fcf8a;--pc3:#b39af5;--pc4:#f07a7a;--pc5:#4cc3dc;--pc6:#e0b84a;--pc7:#f07cb5;--pc8:#a3d65c;--pc9:#959cf2;--pc10:#4fd1bf;--pc11:#d0a877;--pc12:#f0a85a; --warn:#f0c068; --warn-bg:#3a2e14; --bad:#f08a7e; --bad-bg:#3c1d19; color-scheme:dark}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.55;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
 .wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
@@ -92,6 +93,10 @@ input.edit{width:68px;font-family:var(--mono);text-align:right}
 #tblRows select{min-width:7.5em}
 tr.flag td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
 .kbd{font-family:var(--mono);font-size:.82rem;color:var(--muted)}
+.crop{background:var(--surface);border:1px solid var(--accent);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.crop-stage{border:1px solid var(--line);border-radius:6px;background:var(--bg);display:flex;justify-content:center}
+#cropCanvas{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;cursor:crosshair;touch-action:none}
+input.date{font:inherit;font-size:.86rem;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:2px 6px}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.84rem;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -100,10 +105,10 @@ tr.flag td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
   <header>
     <div>
       <h1>สรุปอาหารทางสาย</h1>
-      <p class="sub">อัปโหลดรายงาน "สรุปรายการอาหารที่สั่ง (เฉพาะอาหารทางสาย)" แล้วระบบจะแยกตามอาหารทางการแพทย์และสูตร</p>
+      <p class="sub">รายงานสรุปรายการอาหารที่สั่ง (เฉพาะอาหารทางสาย)</p>
     </div>
     <div class="controls">
-      <button id="btnCopy" type="button">คัดลอกตารางสรุป</button>
+      <button id="btnCopy" type="button">คัดลอกสรุป</button>
       <button id="btnClear" type="button">ล้างข้อมูล</button>
     </div>
   </header>
@@ -111,9 +116,14 @@ tr.flag td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
   <div class="drop" id="drop">
     <label class="btn primary" for="file">เลือกไฟล์</label>
     <input id="file" type="file" accept=".pdf,.csv,.txt,.jpg,.jpeg,.png,.webp,image/*" multiple>
-    <p><strong>ลากไฟล์มาวางที่นี่</strong> ได้ครั้งละไม่เกิน 10 ไฟล์ (PDF จากระบบ, CSV หรือรูปภาพ JPG/PNG) PDF และ CSV อ่านในเครื่องนี้ รูปภาพส่งให้ Claude อ่านข้อความ ไม่ใช้คอลัมน์ลำดับ เตียง ชื่อ-สกุล</p>
+    <p>หรือลากไฟล์มาวาง · PDF, CSV, JPG, PNG · ไม่เกิน 10 ไฟล์</p>
   </div>
   <div id="notice" hidden></div>
+  <div id="cropPanel" class="crop" hidden>
+    <div class="sec-head"><strong id="cropTitle"></strong><span class="small">ลากกรอบเลือกพื้นที่ (ไม่เลือก = ทั้งรูป)</span></div>
+    <div class="crop-stage"><canvas id="cropCanvas"></canvas></div>
+    <div class="controls"><button id="cropRead" class="primary" type="button">อ่าน</button><button id="cropRotate" type="button">หมุน 90°</button><button id="cropReset" type="button">ล้างกรอบ</button><button id="cropSkip" type="button">ข้าม</button></div>
+  </div>
 
   <section>
     <div class="sec-head"><h2>1. ตรวจสอบวันที่</h2><span class="small" id="dateNote"></span></div>
@@ -122,21 +132,20 @@ tr.flag td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
 
   <section>
     <div class="sec-head">
-      <h2>2. แยกตามอาหารทางการแพทย์</h2>
+      <h2>2. สรุปตามชนิดอาหาร</h2>
       <div class="tabs" id="tabs" role="group" aria-label="เลือกวัน"></div>
     </div>
-    <div class="legend"><span>ปริมาณต่อถุง × จำนวนถุง แยกตามสูตร</span><span id="emptyProducts"></span></div>
+    <div class="legend"><span>หน่วย: ถุง</span><span id="emptyProducts"></span></div>
     <div class="cards" id="cards"></div>
   </section>
 
   <section>
     <div class="sec-head">
-      <h2>3. รายการที่อ่านได้</h2>
+      <h2>3. รายการทั้งหมด</h2>
       <div class="controls">
-        <label class="tog"><input type="checkbox" id="onlyFlag" checked> เฉพาะรายการที่ควรตรวจ <span class="chip warn" id="flagCount">0</span></label>
+        <label class="tog"><input type="checkbox" id="onlyFlag" checked> เฉพาะที่ต้องตรวจสอบ <span class="chip warn" id="flagCount">0</span></label>
       </div>
     </div>
-    <p class="small" style="margin:0">แก้ชนิดอาหาร ปริมาณ หรือจำนวนถุงได้ในตาราง ตัวเลขด้านบนจะคำนวณใหม่ทันที</p>
     <div class="tablebox"><table id="tblRows"></table></div>
   </section>
 </div>
@@ -252,7 +261,7 @@ function parseVolume(text) {
   let t = normThai(text).toLowerCase()
     .replace(/(\d)\s*m\s+l/g, '$1ml')
     .replace(/\(?\s*\d*\.?\d+\s*[:;]+\s*\.?\d+(?:\.\d+)?(?:\s*\/\s*\d+)?\s*\)?/g, ' ');
-  let m = t.match(/(\d{2,4})\s*(?:ml|cc|มล\.?|ซีซี)?\s*[x×*]\s*(?:ml\s*[x×*]\s*)?(\d{1,2})(?!\d)/);
+  let m = t.match(/(\d{2,4})\s*(?:[a-z]{1,3}\.?|มล\.?|ซีซี)?\s*[x×*]\s*(?:ml\s*[x×*]\s*)?(\d{1,2})(?!\d)/);
   if (m) {
     const v = +m[1], f = +m[2];
     if (v >= 30 && v <= 1000 && f >= 1 && f <= 12) return { volume: v, feeds: f, assumed: false };
@@ -350,8 +359,118 @@ function menuDate(meta) {
 }
 if (typeof module !== 'undefined') module.exports = { parseReportLines, detectProduct, parseVolume, menuDate, buildRow, PRODUCT_IDS, FORMULAS };
 </script>
+<script>/* ===== image clean-up before OCR: upscale, flatten lighting, black/white, remove table lines ===== */
+function preprocessForOcr(src, crop, opt = {}) {
+  const sx = crop ? crop.x : 0, sy = crop ? crop.y : 0;
+  const sw = crop ? crop.w : src.width, sh = crop ? crop.h : src.height;
+  const scale = Math.min(4, Math.max(1, (opt.width || 2400) / Math.max(sw, 1)));
+  const W = Math.round(sw * scale), H = Math.round(sh * scale);
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d', {willReadFrequently: true});
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  const ang = opt.deskew === false ? 0 : estimateSkew(src, sx, sy, sw, sh);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate(ang); ctx.translate(-W / 2, -H / 2);
+  ctx.drawImage(src, sx, sy, sw, sh, 0, 0, W, H);
+  ctx.restore();
+  const img = ctx.getImageData(0, 0, W, H), d = img.data, n = W * H;
+  const g = new Float32Array(n);
+  for (let i = 0; i < n; i++) g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+  // background estimate: box blur (integral image) over ~1/20 of the width, then divide -> even lighting
+  const r = Math.max(15, Math.round(W / 40));
+  const I = new Float64Array((W + 1) * (H + 1));
+  for (let y = 0; y < H; y++) { let s = 0; for (let x = 0; x < W; x++) { s += g[y * W + x]; I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + s; } }
+  const norm = new Float32Array(n);
+  for (let y = 0; y < H; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(H, y + r + 1);
+    for (let x = 0; x < W; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(W, x + r + 1);
+      const mean = (I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+      norm[y * W + x] = Math.min(255, g[y * W + x] / Math.max(mean, 1) * 235);
+    }
+  }
+  // Otsu threshold
+  const hist = new Array(256).fill(0); for (let i = 0; i < n; i++) hist[norm[i] | 0]++;
+  let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sB = 0, wB = 0, best = 0, th = 160;
+  for (let t = 0; t < 256; t++) { wB += hist[t]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += t * hist[t];
+    const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) ** 2; if (v > best) { best = v; th = t; } }
+  const bw = new Uint8Array(n); for (let i = 0; i < n; i++) bw[i] = norm[i] < th ? 1 : 0;
+  // erase long straight runs (table borders) that confuse Tesseract
+  // erase long straight runs (table borders) that confuse Tesseract; a looser mask also catches faint, anti-aliased borders
+  const lth = th + (235 - th) * 0.5, lm = new Uint8Array(n); for (let i = 0; i < n; i++) lm[i] = norm[i] < lth ? 1 : 0;
+  const line = new Uint8Array(n), hMin = Math.round(W * 0.06), vMin = Math.round(H * 0.05);
+  for (let y = 0; y < H; y++) { let x = 0; while (x < W) { if (!lm[y * W + x]) { x++; continue; } let e = x; while (e < W && lm[y * W + e]) e++; if (e - x >= hMin) for (let k = x; k < e; k++) line[y * W + k] = 1; x = e; } }
+  for (let x = 0; x < W; x++) { let y = 0; while (y < H) { if (!lm[y * W + x]) { y++; continue; } let e = y; while (e < H && lm[e * W + x]) e++; if (e - y >= vMin) for (let k = y; k < e; k++) line[k * W + x] = 1; y = e; } }
+  // grow the erased area by 1 px to remove the grey halo around each border
+  const kill = line.slice();
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const i = y * W + x; if (line[i]) { kill[i - 1] = kill[i + 1] = kill[i - W] = kill[i + W] = 1; } }
+  const out = bw.slice(); for (let i = 0; i < n; i++) if (kill[i]) out[i] = 0;
+  // output: greyscale with even lighting (Tesseract binarises better itself), table lines painted white
+  for (let i = 0; i < n; i++) {
+    let v = opt.binary ? (out[i] ? 0 : 255) : (kill[i] && !opt.keepLines ? 255 : Math.max(0, Math.min(255, (norm[i] - th * 0.55) / (235 - th * 0.55) * 255)));
+    d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v; d[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
+/* skew angle (radians) of text lines: the rotation that makes horizontal dark-pixel profiles sharpest */
+function estimateSkew(src, sx, sy, sw, sh) {
+  const w = Math.min(900, sw), h = Math.round(sh * w / sw);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d', {willReadFrequently: true}); x.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data;
+  let mean = 0; for (let i = 0; i < w * h; i++) mean += d[i * 4 + 1]; mean /= w * h;
+  const px = [], py = [];
+  for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (d[(yy * w + xx) * 4 + 1] < mean * 0.6) { px.push(xx - w / 2); py.push(yy); }
+  if (px.length < 200) return 0;
+  const score = a => { const sn = Math.sin(a), cs = Math.cos(a), bins = new Float64Array(h * 2 + 2);
+    for (let i = 0; i < px.length; i++) { const b = Math.round(py[i] * cs + px[i] * sn) + h / 2 | 0; if (b >= 0 && b < bins.length) bins[b]++; }
+    let s2 = 0; for (const v of bins) s2 += v * v; return s2; };
+  let best = 0, bestS = -1;
+  for (let deg = -6; deg <= 6; deg += 0.5) { const sc = score(deg * Math.PI / 180); if (sc > bestS) { bestS = sc; best = deg; } }
+  for (let deg = best - 0.5; deg <= best + 0.5; deg += 0.1) { const sc = score(deg * Math.PI / 180); if (sc > bestS) { bestS = sc; best = deg; } }
+  return Math.abs(best) < 0.15 ? 0 : best * Math.PI / 180;
+}
+</script>
+<script>/* ===== clean up common Tesseract mistakes in this report, then keep the food column ===== */
+function fixOcrText(text) {
+  const out = [];
+  for (let line of String(text).split('\n')) {
+    let t = line.replace(/๓\s*[1lI|!]/g, 'ml').replace(/[๐-๙]/g, c => String(c.charCodeAt(0) - 0x0E50))
+      .replace(/[“”"‘’`]/g, '').replace(/[×✕]/g, 'x').replace(/ํา/g, 'ำ');
+    // date: 20/10!2026 -> 20/10/2026
+    t = t.replace(/(\d{1,2})\s*[\/!|lI1]\s*(\d{1,2})\s*[\/!|lI]\s*((?:20|25)\d{2})/, (m, d, mo, y) => (+d <= 31 && +mo <= 12) ? `${d}/${mo}/${y}` : m);
+    // "อาหารทางสาย" with OCR noise
+    t = t.replace(/อ\s*[าๅำ]?\s*ห\s*[าๅ]?\s*[รธ]\s*ท\s*[าๅ]?\s*ง\s*[สลศ]\s*[าๅ]?\s*[ยขบ]/g, 'อาหารทางสาย');
+    // first letters often misread (กาหาร / คกาหาร / ต์าหาร): anchor on "...หาร ทางสาย" / "...พาร ทางสาย"
+    if (!t.includes('อาหารทางสาย')) t = t.replace(/(^|[\s|])[ก-๛]{1,5}?[หพ]\s*[าๅ]\s*[รธ]\s*[ทพ]\s*[าๅ]\s*ง\s*[สลศ]\s*[าๅ]\s*[ยขบ]/, '$1อาหารทางสาย');
+    const i = t.indexOf('อาหารทางสาย');
+    if (i < 0) { out.push(t); continue; }
+    if (/เฉพาะ\s*$/.test(t.slice(0, i)) || !/\d/.test(t.slice(i))) { out.push(t.replace('อาหารทางสาย', '')); continue; }  // report title, not an order
+    let food = t.slice(i + 'อาหารทางสาย'.length);
+    // "สูตร 1.5 : 1(" with noise: สตร / สุตร / ลูตร, 15:1 -> 1.5:1, 1 5 : l -> 1.5:1
+    food = food.replace(/^\s*[สลศ]\s*[ูุ]?\s*[ตดฅค][ก-ฮ]{0,3}?\s*(?=[\d!|lI])/, 'สูตร ').replace(/^\s*[สลศ]\s*[ูุ]?\s*[ตดฅ]\s*[รธ]\s*/, 'สูตร ');
+    // formula: read the digits between "สูตร" and the first bracket (":" is often lost or read as 4)
+    const fm = food.match(/^สูตร\s*([\d\s.,:;!|lI4]{1,12}?)\s*[(\[{]/);
+    if (fm) {
+      const dg = fm[1].replace(/[!|lI]/g, '1').replace(/[^\d]/g, '');
+      const map = {'11': '1', '1': '1', '121': '1.2', '12': '1.2', '151': '1.5', '15': '1.5', '21': '2', '2': '2', '141': '1.5', '1141': '1', '1411': '1', '2141': '2'};
+      const f = map[dg] || (dg.length >= 2 ? dg[0] + '.' + dg[1] : dg);
+      food = `สูตร ${f} : 1(` + food.slice(fm[0].length);
+    }
+    // inside the order: O/o next to digits -> 0, l/I/| next to digits -> 1
+    food = food.replace(/(\d)\s*%\s*(?=\d)/g, '$1*').replace(/(\d)[Oo](?=[\dOo\s*xml]|$)/g, '$10').replace(/(\d)[Oo]/g, '$10')
+               .replace(/[Oo](?=\d)/g, '0')
+               .replace(/(\d)[lI|](?=\d)/g, '$11').replace(/(?<=[\s(*x])[lI|](?=\d)/g, '1');
+    out.push('0 อาหารทางสาย' + (food.startsWith(' ') ? '' : ' ') + food.trim());
+  }
+  return out;
+}
+if (typeof module !== 'undefined') module.exports = { fixOcrText };
+</script>
 <script>
-const SAMPLE = [{"name": "Report19.pdf", "lines": ["วันที่ตรวจสอบรายการ :20/10/2026 16:19:56", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : จันทร์", "ตึก :อายุรกรรมชาย", "0 อาหารทางสาย สูตร 1.5 : 1(300*4)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4)", "0 อาหารทางสาย สูตร 1 : 1(bd300xmlx400f)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4)", "0 อาหารทางสาย สูตร 1 : 1(BD 250 X 4 F)", "0 อาหารทางสาย สูตร 1 : 1(200*4F)", "0 อาหารทางสาย สูตร 1 : 1(300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD250 X 4 F)", "0 อาหารทางสาย สูตร 1.2 : 1(BD 200 ml x 4 Feed)", "0 อาหารทางสาย สูตร 1.5 : 1(350*4+Protien 100gm/day)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4 TP 80 g/d)", "0 อาหารทางสาย สูตร 1.5 : 1(BD(1.5:1)300 x4feed)", "0 อาหารทางสาย สูตร 1 : 1(100*4)", "0 อาหารทางสาย สูตร 1.5 : 1(DM,Na<2g,Protein 70 g/day 300ml*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5 : 1) 300*4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(300 ml * 4 feed)", "ตึก :ICUอายุรกรรม", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD 300 ccx 4F)", "0 อาหารทางสาย สูตร 2 : 1(BD150 ccx4F)", "0 อาหารทางสาย สูตร 2 : 1(◌ฺBD 150 ml x 4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(BD(1:1) 300 ml x 4 มื้อ)", "0 อาหารทางสาย สูตร 1.5 : 1(BD Low Na 250 m lx 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD Low salt low PO low K 250 ml x 4 feeds +", "วันที่ตรวจสอบรายการ :20/10/2026 16:19:56", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : จันทร์", "ตึก :ICUอายุรกรรม", "0 อาหารทางสาย สูตร 1.5 : 1(250 ml*4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD low salt low phosphate low K (1.5:1) 200", "0 อาหารทางสาย สูตร 1.5 : 1(BD300 x4F)", "0 อาหารทางสาย สูตร 1.2 : 1(BD DM (1.2:1) 250 ml *4 feeds)", "0 อาหารทางสาย สูตร 2 : 1(BD DM low salt(2:1) 150 ml x 4 feed)", "0 อาหารทางสาย สูตร 1.2 : 1(BD DM 250 ml x 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD low salt low po low k prot. 70 gm/d 200ml", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(Jevity(1.5:1)200ml x4 feed+ ไข่ขาว2ฟอง/feed)", "ตึก :ICU ศัลยกรรม", "0 อาหารทางสาย สูตร 1.5 : 1(Peptamen (1.5:1) 300 ml x4 feed + Protein 70", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 350 ml x 4)", "ตึก :พิเศษ1/5", "0 อาหารทางสาย สูตร 1 : 1(DM250x4+Whey prot 7 g/Feed)", "0 อาหารทางสาย สูตร 1 : 1()", "0 อาหารทางสาย สูตร 1 : 1(DM 300x4)", "ตึก :พิเศษ2/3(พทส)", "0 อาหารทางสาย สูตร 1 : 1(200 ml x 4 มื้อ ดูดเสริม)", "ตึก :อายุรกรรมหญิง", "0 อาหารทางสาย สูตร 1 : 1(250 ml x 4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(GEN DM (1:1) 250 ml * 4 feed + add protein 70", "วันที่ตรวจสอบรายการ :20/10/2026 16:19:56", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : จันทร์", "ตึก :อายุรกรรมหญิง", "0 อาหารทางสาย สูตร 1.5 : 1( 250 ml * 4)", "0 อาหารทางสาย สูตร 1.5 : 1(200*4F)", "0 อาหารทางสาย สูตร 1.5 : 1(Gen DM 200*4 F)", "0 อาหารทางสาย สูตร 1.5 : 1(200*4)", "0 อาหารทางสาย สูตร 1 : 1(200ml*4feed add ไข่ขาว 1 ฟอง ต่อมื้อ)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4)", "0 อาหารทางสาย สูตร 1 : 1( 250 ml x 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(250*4 add protein 7 gm/ feed)", "0 อาหารทางสาย สูตร 1.5 : 1(GENDM 200*4+โปรตีนไข่ขาว 1 ฟอง/มื้อ)", "0 อาหารทางสาย สูตร 1 : 1(fresubin (1:1)200ml*3 ดูดเสริม)", "0 อาหารทางสาย สูตร 1 : 1(fresubin (1:1) 200 ml * 2 feed เสริม เช้า 20.00)", "0 อาหารทางสาย สูตร 1.5 : 1(200*4F)", "ตึก :พิเศษประกันสังคม", "0 อาหารทางสาย สูตร 1 : 1(◌ิbd200x4f)", "ตึก :RCU", "0 อาหารทางสาย สูตร 2 : 1(BD (2:1) 200 ml x 4 feeds)", "0 อาหารทางสาย สูตร 1.5 : 1(300 ml * 4 feed Add ไข่ขาว2ฟอง/มื้อ)", "0 อาหารทางสาย สูตร 1 : 1(neomoon 300*4 F add ไข่ขาว 1 ฟองต่อมื้อ)", "0 อาหารทางสาย สูตร 1 : 1(peptamen 250x4)", "0 อาหารทางสาย สูตร 1.5 : 1(BD ( 1.5:1) 300 ml * 4 feed ,(TP 80 g/day))", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5 : 1) 300 ml * 4 feed + นํ้าตาม 50 ml/fe", "0 อาหารทางสาย สูตร 1.5 : 1( 250 ml* 4 feeds[low salt low, phosphate, low", "0 อาหารทางสาย สูตร 1.5 : 1(BD 1:.5/1 200 CC *4 FEED นํ้าตาม 30 cc/feed", "วันที่ตรวจสอบรายการ :20/10/2026 16:19:56", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : จันทร์", "ตึก :RCU", "0 อาหารทางสาย สูตร 1.5 : 1( neomune DM 250 ml x 4 feed)", "0 อาหารทางสาย สูตร 2 : 1(Gen Dm 2;1 200*4F)", "0 อาหารทางสาย สูตร 1 : 1(peptamen(1:1) 250 ml * 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(300 ml x 4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD250ml*4Feed+Protein60gm/day)", "0 อาหารทางสาย สูตร 1 : 1(gen DM 300*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml x 4 feed + นํ้าตาม 50 ml/fee", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5::1) 200 ml * 4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(300*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(200ml *4 f)", "ตึก :ศัลยกรรมชาย", "0 อาหารทางสาย สูตร 1 : 1(neomune (1:1) 200 x 4 fedd ไข่ขาว 2/มื้อ)", "0 อาหารทางสาย สูตร 1 : 1(Neomune (1:1) 300 mlx 4 feed + ไข่2ฟอง/มื้อ)", "0 อาหารทางสาย สูตร 1.5 : 1(Gen DM (1:1) 300 ml * 4 feed+ไข่ขาว 2 ฟอง/", "0 อาหารทางสาย สูตร 1.5 : 1(BD low salt (1.5:1) 250 *4 feeds + นํ้าตาม 50", "0 อาหารทางสาย สูตร 1.2 : 1(◌์Neomune 400 ml * 4 feed + ไข่ขาว 2 ฟอง/fe", "0 อาหารทางสาย สูตร 1 : 1(BD 250*4F)", "ตึก :หอผู้ป่วยโรคหลอดเลือดสมอง", "0 อาหารทางสาย สูตร 1.5 : 1(Gen DM (200 ml * 4 feed))", "0 อาหารทางสาย สูตร 1 : 1(Pepamen 200 ml x 4 +ไข่ขาว 1 ฟอง /มื้อ)", "0 อาหารทางสาย สูตร 1 : 1( GENDM 300 ml x 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 250 ml * 4 feed)", "วันที่ตรวจสอบรายการ :20/10/2026 16:19:57", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : จันทร์", "ตึก :พิเศษฉัตรหลวง3", "0 อาหารทางสาย สูตร 1 : 1( 300 x 4 Feed)", "0 อาหารทางสาย สูตร 1 : 1(200 mlx4feed)", "ตึก :ศัลยกรรมหญิง", "0 อาหารทางสาย สูตร 1.2 : 1(BD (1.2:1) 250ml*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1((1.5:1)300ml*4feed + นํ้าตาม 50 ml/feed)", "0 อาหารทางสาย สูตร 1.2 : 1(+ไข่ขาว2ฟองมื้อ (400 ml x 4 f))", "0 อาหารทางสาย สูตร 1 : 1(เวย์โปรตีน 20 g/มื้อ ดูดเสริมมื้อกลางวัน)", "ตึก :อายุรกรรม 3/4", "0 อาหารทางสาย สูตร 1 : 1(250 mL x 4feed)", "0 อาหารทางสาย สูตร 1 : 1(300 ml x 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(BD(1:1)150 ML* 4 FEED)", "0 อาหารทางสาย สูตร 1 : 1(GEN DM (1:1) 250 ml * 4 feed+TP 60 g/day)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4 feed TP 100 gm/day นํ้าตาม 50 ml /feed", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 250 ml * 4 Feed)", "ตึก :พิเศษศัลยกรรม", "0 อาหารทางสาย สูตร 1 : 1(peptamen 350*4F)", "ตึก :ออร์โธปิดิกส์ชาย", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 300 ml x 4 feed)"]}, {"name": "Report20.pdf", "lines": ["วันที่ตรวจสอบรายการ :20/10/2026 16:16:47", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : อังคาร", "ตึก :อายุรกรรมชาย", "0 อาหารทางสาย สูตร 1.5 : 1(300*4)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4)", "0 อาหารทางสาย สูตร 1 : 1(bd300xmlx400f)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4)", "0 อาหารทางสาย สูตร 1 : 1(BD 250 X 4 F)", "0 อาหารทางสาย สูตร 1 : 1(200*4F)", "0 อาหารทางสาย สูตร 1 : 1(300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD250 X 4 F)", "0 อาหารทางสาย สูตร 1.2 : 1(BD 200 ml x 4 Feed)", "0 อาหารทางสาย สูตร 1.5 : 1(350*4+Protien 100gm/day)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4 TP 80 g/d)", "0 อาหารทางสาย สูตร 1.5 : 1(BD(1.5:1)300 x4feed)", "0 อาหารทางสาย สูตร 1 : 1(100*4)", "0 อาหารทางสาย สูตร 1.5 : 1(DM,Na<2g,Protein 70 g/day 300ml*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5 : 1) 300*4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(300 ml * 4 feed)", "ตึก :ICUอายุรกรรม", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD 300 ccx 4F)", "0 อาหารทางสาย สูตร 2 : 1(BD150 ccx4F)", "0 อาหารทางสาย สูตร 2 : 1(◌ฺBD 150 ml x 4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(BD(1:1) 300 ml x 4 มื้อ)", "0 อาหารทางสาย สูตร 1.5 : 1(BD Low Na 250 m lx 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD Low salt low PO low K 250 ml x 4 feeds +", "วันที่ตรวจสอบรายการ :20/10/2026 16:16:57", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : อังคาร", "ตึก :ICUอายุรกรรม", "0 อาหารทางสาย สูตร 1.5 : 1(250 ml*4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD low salt low phosphate low K (1.5:1) 200", "0 อาหารทางสาย สูตร 1.5 : 1(BD300 x4F)", "0 อาหารทางสาย สูตร 1.2 : 1(BD DM (1.2:1) 250 ml *4 feeds)", "0 อาหารทางสาย สูตร 2 : 1(BD DM low salt(2:1) 150 ml x 4 feed)", "0 อาหารทางสาย สูตร 1.2 : 1(BD DM 250 ml x 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD low salt low po low k prot. 70 gm/d 200ml", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(Jevity(1.5:1)200ml x4 feed+ ไข่ขาว2ฟอง/feed)", "ตึก :ICU ศัลยกรรม", "0 อาหารทางสาย สูตร 1 : 1(BD(1:1) 300ml x 4 feeds+Protein 70 gm/day)", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml x feed)", "0 อาหารทางสาย สูตร 1 : 1(DM BD (1:1) 300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD(1.5:1) 200 * 4 feeds)", "0 อาหารทางสาย สูตร 1.5 : 1(Peptamen (1.5:1) 300 ml x4 feed + Protein 70", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 350 ml x 4)", "0 อาหารทางสาย สูตร 1 : 1(BD lowsalt (1:1)300 x 4 F + protein 70 gm /da", "0 อาหารทางสาย สูตร 1.5 : 1(BD(1.5:1) 300 ml x 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml * 4 F+Protein 80 g/day)", "0 อาหารทางสาย สูตร 1.5 : 1(BD 1.5:1 300 ml x 4 feed + นํ้าตาม 50 ml/feed)", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 350 ml *4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 350 ml x 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(Peptamen (1.5:1) 300 ml x 4 Feed)", "วันที่ตรวจสอบรายการ :20/10/2026 16:16:58", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : อังคาร", "ตึก :พิเศษ1/5", "0 อาหารทางสาย สูตร 1 : 1(DM250x4+Whey prot 7 g/Feed)", "0 อาหารทางสาย สูตร 1 : 1()", "0 อาหารทางสาย สูตร 1 : 1(DM 300x4)", "ตึก :พิเศษ2/3(พทส)", "0 อาหารทางสาย สูตร 1 : 1(200 ml x 4 มื้อ ดูดเสริม)", "ตึก :อายุรกรรมหญิง", "0 อาหารทางสาย สูตร 1 : 1(250 ml x 4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(GEN DM (1:1) 250 ml * 4 feed + add protein 70", "0 อาหารทางสาย สูตร 1.5 : 1( 250 ml * 4)", "0 อาหารทางสาย สูตร 1.5 : 1(200*4F)", "0 อาหารทางสาย สูตร 1.5 : 1(Gen DM 200*4 F)", "0 อาหารทางสาย สูตร 1.5 : 1(200*4)", "0 อาหารทางสาย สูตร 1 : 1(200ml*4feed add ไข่ขาว 1 ฟอง ต่อมื้อ)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4)", "0 อาหารทางสาย สูตร 1 : 1( 250 ml x 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(250*4 add protein 7 gm/ feed)", "0 อาหารทางสาย สูตร 1.5 : 1(GENDM 200*4+โปรตีนไข่ขาว 1 ฟอง/มื้อ)", "0 อาหารทางสาย สูตร 1 : 1(fresubin (1:1)200ml*3 ดูดเสริม)", "0 อาหารทางสาย สูตร 1 : 1(fresubin (1:1) 200 ml * 2 feed เสริม เช้า 20.00)", "0 อาหารทางสาย สูตร 1.5 : 1(200*4F)", "ตึก :พิเศษประกันสังคม", "0 อาหารทางสาย สูตร 1 : 1(◌ิbd200x4f)", "วันที่ตรวจสอบรายการ :20/10/2026 16:16:58", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : อังคาร", "ตึก :RCU", "0 อาหารทางสาย สูตร 2 : 1(BD (2:1) 200 ml x 4 feeds)", "0 อาหารทางสาย สูตร 1.5 : 1(300 ml * 4 feed Add ไข่ขาว2ฟอง/มื้อ)", "0 อาหารทางสาย สูตร 1 : 1(neomoon 300*4 F add ไข่ขาว 1 ฟองต่อมื้อ)", "0 อาหารทางสาย สูตร 1 : 1(peptamen 250x4)", "0 อาหารทางสาย สูตร 1.5 : 1(BD ( 1.5:1) 300 ml * 4 feed ,(TP 80 g/day))", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5 : 1) 300 ml * 4 feed + นํ้าตาม 50 ml/fe", "0 อาหารทางสาย สูตร 1.5 : 1( 250 ml* 4 feeds[low salt low, phosphate, low", "0 อาหารทางสาย สูตร 1.5 : 1(BD 1:.5/1 200 CC *4 FEED นํ้าตาม 30 cc/feed", "0 อาหารทางสาย สูตร 1.5 : 1( neomune DM 250 ml x 4 feed)", "0 อาหารทางสาย สูตร 2 : 1(Gen Dm 2;1 200*4F)", "0 อาหารทางสาย สูตร 1 : 1(peptamen(1:1) 250 ml * 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(300 ml x 4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD250ml*4Feed+Protein60gm/day)", "0 อาหารทางสาย สูตร 1 : 1(gen DM 300*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml x 4 feed + นํ้าตาม 50 ml/fee", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5::1) 200 ml * 4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(300*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(200ml *4 f)", "ตึก :ศัลยกรรมชาย", "0 อาหารทางสาย สูตร 1 : 1(neomune (1:1) 200 x 4 fedd ไข่ขาว 2/มื้อ)", "0 อาหารทางสาย สูตร 1 : 1(Neomune (1:1) 300 mlx 4 feed + ไข่2ฟอง/มื้อ)", "0 อาหารทางสาย สูตร 1.5 : 1(Gen DM (1:1) 300 ml * 4 feed+ไข่ขาว 2 ฟอง/", "0 อาหารทางสาย สูตร 1.5 : 1(BD low salt (1.5:1) 250 *4 feeds + นํ้าตาม 50", "0 อาหารทางสาย สูตร 1 : 1(peptamen (1:1) 300 ml *4 feed)", "วันที่ตรวจสอบรายการ :20/10/2026 16:16:58", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : อังคาร", "ตึก :ศัลยกรรมชาย", "0 อาหารทางสาย สูตร 1.2 : 1(◌์Neomune 400 ml * 4 feed + ไข่ขาว 2 ฟอง/fe", "0 อาหารทางสาย สูตร 1 : 1(BD 250*4F)", "ตึก :หอผู้ป่วยโรคหลอดเลือดสมอง", "0 อาหารทางสาย สูตร 1.5 : 1(Gen DM (200 ml * 4 feed))", "0 อาหารทางสาย สูตร 1 : 1(Pepamen 200 ml x 4 +ไข่ขาว 1 ฟอง /มื้อ)", "0 อาหารทางสาย สูตร 1 : 1( GENDM 300 ml x 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 250 ml * 4 feed)", "ตึก :พิเศษฉัตรหลวง3", "0 อาหารทางสาย สูตร 1 : 1( 300 x 4 Feed)", "0 อาหารทางสาย สูตร 1 : 1(200 mlx4feed)", "ตึก :ศัลยกรรมหญิง", "0 อาหารทางสาย สูตร 1.2 : 1(BD (1.2:1) 250ml*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1((1.5:1)300ml*4feed + นํ้าตาม 50 ml/feed)", "0 อาหารทางสาย สูตร 1.2 : 1(+ไข่ขาว2ฟองมื้อ (400 ml x 4 f))", "0 อาหารทางสาย สูตร 1 : 1(เวย์โปรตีน 20 g/มื้อ ดูดเสริมมื้อกลางวัน)", "ตึก :อายุรกรรม 3/4", "0 อาหารทางสาย สูตร 1 : 1(250 mL x 4feed)", "0 อาหารทางสาย สูตร 1 : 1(300 ml x 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(BD(1:1)150 ML* 4 FEED)", "0 อาหารทางสาย สูตร 1 : 1(GEN DM (1:1) 250 ml * 4 feed+TP 60 g/day)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4 feed TP 100 gm/day นํ้าตาม 50 ml /feed", "วันที่ตรวจสอบรายการ :20/10/2026 16:16:58", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : อังคาร", "ตึก :อายุรกรรม 3/4", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 250 ml * 4 Feed)", "ตึก :พิเศษศัลยกรรม", "0 อาหารทางสาย สูตร 1 : 1(peptamen 350*4F)", "ตึก :ออร์โธปิดิกส์ชาย", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 300 ml x 4 feed)"]}, {"name": "Report21.pdf", "lines": ["วันที่ตรวจสอบรายการ :20/10/2026 16:18:52", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : พุธ", "ตึก :อายุรกรรมชาย", "0 อาหารทางสาย สูตร 1.5 : 1(300*4)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4)", "0 อาหารทางสาย สูตร 1 : 1(bd300xmlx400f)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4)", "0 อาหารทางสาย สูตร 1 : 1(BD 250 X 4 F)", "0 อาหารทางสาย สูตร 1 : 1(200*4F)", "0 อาหารทางสาย สูตร 1 : 1(300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD250 X 4 F)", "0 อาหารทางสาย สูตร 1.2 : 1(BD 200 ml x 4 Feed)", "0 อาหารทางสาย สูตร 1.5 : 1(350*4+Protien 100gm/day)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4 TP 80 g/d)", "0 อาหารทางสาย สูตร 1.5 : 1(BD(1.5:1)300 x4feed)", "0 อาหารทางสาย สูตร 1 : 1(100*4)", "0 อาหารทางสาย สูตร 1.5 : 1(DM,Na<2g,Protein 70 g/day 300ml*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5 : 1) 300*4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(300 ml * 4 feed)", "ตึก :ICUอายุรกรรม", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD 300 ccx 4F)", "0 อาหารทางสาย สูตร 2 : 1(BD150 ccx4F)", "0 อาหารทางสาย สูตร 2 : 1(◌ฺBD 150 ml x 4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(BD(1:1) 300 ml x 4 มื้อ)", "0 อาหารทางสาย สูตร 1.5 : 1(BD Low Na 250 m lx 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD Low salt low PO low K 250 ml x 4 feeds +", "วันที่ตรวจสอบรายการ :20/10/2026 16:18:53", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : พุธ", "ตึก :ICUอายุรกรรม", "0 อาหารทางสาย สูตร 1.5 : 1(250 ml*4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD low salt low phosphate low K (1.5:1) 200", "0 อาหารทางสาย สูตร 1.5 : 1(BD300 x4F)", "0 อาหารทางสาย สูตร 1.2 : 1(BD DM (1.2:1) 250 ml *4 feeds)", "0 อาหารทางสาย สูตร 2 : 1(BD DM low salt(2:1) 150 ml x 4 feed)", "0 อาหารทางสาย สูตร 1.2 : 1(BD DM 250 ml x 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD low salt low po low k prot. 70 gm/d 200ml", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml * 4 feed)", "0 อาหารทางสาย สูตร 1.5 : 1(Jevity(1.5:1)200ml x4 feed+ ไข่ขาว2ฟอง/feed)", "ตึก :พิเศษ1/5", "0 อาหารทางสาย สูตร 1 : 1(DM250x4+Whey prot 7 g/Feed)", "0 อาหารทางสาย สูตร 1 : 1()", "0 อาหารทางสาย สูตร 1 : 1(DM 300x4)", "ตึก :พิเศษ2/3(พทส)", "0 อาหารทางสาย สูตร 1 : 1(200 ml x 4 มื้อ ดูดเสริม)", "ตึก :อายุรกรรมหญิง", "0 อาหารทางสาย สูตร 1 : 1(250 ml x 4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(GEN DM (1:1) 250 ml * 4 feed + add protein 70", "0 อาหารทางสาย สูตร 1.5 : 1( 250 ml * 4)", "0 อาหารทางสาย สูตร 1.5 : 1(200*4F)", "0 อาหารทางสาย สูตร 1.5 : 1(Gen DM 200*4 F)", "0 อาหารทางสาย สูตร 1.5 : 1(200*4)", "วันที่ตรวจสอบรายการ :20/10/2026 16:18:53", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : พุธ", "ตึก :อายุรกรรมหญิง", "0 อาหารทางสาย สูตร 1 : 1(200ml*4feed add ไข่ขาว 1 ฟอง ต่อมื้อ)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4)", "0 อาหารทางสาย สูตร 1 : 1( 250 ml x 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(250*4 add protein 7 gm/ feed)", "0 อาหารทางสาย สูตร 1.5 : 1(GENDM 200*4+โปรตีนไข่ขาว 1 ฟอง/มื้อ)", "0 อาหารทางสาย สูตร 1 : 1(fresubin (1:1)200ml*3 ดูดเสริม)", "0 อาหารทางสาย สูตร 1 : 1(fresubin (1:1) 200 ml * 2 feed เสริม เช้า 20.00)", "0 อาหารทางสาย สูตร 1.5 : 1(200*4F)", "ตึก :พิเศษประกันสังคม", "0 อาหารทางสาย สูตร 1 : 1(◌ิbd200x4f)", "ตึก :RCU", "0 อาหารทางสาย สูตร 2 : 1(BD (2:1) 200 ml x 4 feeds)", "0 อาหารทางสาย สูตร 1.5 : 1(300 ml * 4 feed Add ไข่ขาว2ฟอง/มื้อ)", "0 อาหารทางสาย สูตร 1 : 1(neomoon 300*4 F add ไข่ขาว 1 ฟองต่อมื้อ)", "0 อาหารทางสาย สูตร 1 : 1(peptamen 250x4)", "0 อาหารทางสาย สูตร 1.5 : 1(BD ( 1.5:1) 300 ml * 4 feed ,(TP 80 g/day))", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5 : 1) 300 ml * 4 feed + นํ้าตาม 50 ml/fe", "0 อาหารทางสาย สูตร 1.5 : 1( 250 ml* 4 feeds[low salt low, phosphate, low", "0 อาหารทางสาย สูตร 1.5 : 1(BD 1:.5/1 200 CC *4 FEED นํ้าตาม 30 cc/feed", "0 อาหารทางสาย สูตร 1.5 : 1( neomune DM 250 ml x 4 feed)", "0 อาหารทางสาย สูตร 2 : 1(Gen Dm 2;1 200*4F)", "0 อาหารทางสาย สูตร 1 : 1(peptamen(1:1) 250 ml * 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(300 ml x 4feed)", "วันที่ตรวจสอบรายการ :20/10/2026 16:18:53", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : พุธ", "ตึก :RCU", "0 อาหารทางสาย สูตร 1.5 : 1(BD250ml*4Feed+Protein60gm/day)", "0 อาหารทางสาย สูตร 1 : 1(gen DM 300*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5:1) 300 ml x 4 feed + นํ้าตาม 50 ml/fee", "0 อาหารทางสาย สูตร 1.5 : 1(BD (1.5::1) 200 ml * 4 feeds)", "0 อาหารทางสาย สูตร 1 : 1(300*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1(200ml *4 f)", "ตึก :ศัลยกรรมชาย", "0 อาหารทางสาย สูตร 1 : 1(neomune (1:1) 200 x 4 fedd ไข่ขาว 2/มื้อ)", "0 อาหารทางสาย สูตร 1 : 1(Neomune (1:1) 300 mlx 4 feed + ไข่2ฟอง/มื้อ)", "0 อาหารทางสาย สูตร 1.5 : 1(Gen DM (1:1) 300 ml * 4 feed+ไข่ขาว 2 ฟอง/", "0 อาหารทางสาย สูตร 1.5 : 1(BD low salt (1.5:1) 250 *4 feeds + นํ้าตาม 50", "0 อาหารทางสาย สูตร 1.2 : 1(◌์Neomune 400 ml * 4 feed + ไข่ขาว 2 ฟอง/fe", "0 อาหารทางสาย สูตร 1 : 1(BD 250*4F)", "ตึก :หอผู้ป่วยโรคหลอดเลือดสมอง", "0 อาหารทางสาย สูตร 1.5 : 1(Gen DM (200 ml * 4 feed))", "0 อาหารทางสาย สูตร 1 : 1(Pepamen 200 ml x 4 +ไข่ขาว 1 ฟอง /มื้อ)", "0 อาหารทางสาย สูตร 1 : 1( GENDM 300 ml x 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 250 ml * 4 feed)", "ตึก :พิเศษฉัตรหลวง3", "0 อาหารทางสาย สูตร 1 : 1( 300 x 4 Feed)", "0 อาหารทางสาย สูตร 1 : 1(200 mlx4feed)", "วันที่ตรวจสอบรายการ :20/10/2026 16:18:53", "มื้อที่เลือก: ALLตรวจสอบรายการอาหารวัน : พุธ", "ตึก :ศัลยกรรมหญิง", "0 อาหารทางสาย สูตร 1.2 : 1(BD (1.2:1) 250ml*4feed)", "0 อาหารทางสาย สูตร 1.5 : 1((1.5:1)300ml*4feed + นํ้าตาม 50 ml/feed)", "0 อาหารทางสาย สูตร 1.2 : 1(+ไข่ขาว2ฟองมื้อ (400 ml x 4 f))", "0 อาหารทางสาย สูตร 1 : 1(เวย์โปรตีน 20 g/มื้อ ดูดเสริมมื้อกลางวัน)", "ตึก :อายุรกรรม 3/4", "0 อาหารทางสาย สูตร 1 : 1(250 mL x 4feed)", "0 อาหารทางสาย สูตร 1 : 1(300 ml x 4 feed)", "0 อาหารทางสาย สูตร 1 : 1(BD(1:1)150 ML* 4 FEED)", "0 อาหารทางสาย สูตร 1 : 1(GEN DM (1:1) 250 ml * 4 feed+TP 60 g/day)", "0 อาหารทางสาย สูตร 1.5 : 1(250*4 feed TP 100 gm/day นํ้าตาม 50 ml /feed", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 250 ml * 4 Feed)", "ตึก :พิเศษศัลยกรรม", "0 อาหารทางสาย สูตร 1 : 1(peptamen 350*4F)", "ตึก :ออร์โธปิดิกส์ชาย", "0 อาหารทางสาย สูตร 1 : 1(BD (1:1) 300 ml x 4 feed)"]}];
 const MAX_FILES = 10;
 const TH_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 const FCLS = {'1:1':'f-11','1.2:1':'f-12','1.5:1':'f-15','2:1':'f-21'};
@@ -465,20 +584,71 @@ function imageJsonToLines(data) {
   }
   return lines;
 }
-let tesseractLoad = null;
-async function readImageWithOcr(file, onProgress) {
-  tesseractLoad ??= new Promise((res, rej) => {
-    const sc = document.createElement('script');
-    sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
-    sc.onload = res; sc.onerror = () => rej(new Error('โหลดตัวอ่านภาพไม่ได้ ต้องต่ออินเทอร์เน็ต'));
-    document.head.appendChild(sc);
+let ocrWorker = null;
+const OCR_PSM = '6', OCR_WIDTH = 2400;   // tuned on sample report photos: one text block, ~2400 px wide
+const OCR_LANG_PATH = 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main';  // most accurate Thai model
+async function getOcrWorker(onProgress) {
+  ocrWorker ??= (async () => {
+    await new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+      sc.onload = res; sc.onerror = () => rej(new Error('โหลดตัวอ่านภาพไม่ได้ ต้องต่ออินเทอร์เน็ต'));
+      document.head.appendChild(sc);
+    });
+    const w = await Tesseract.createWorker('tha+eng', 1, {langPath: OCR_LANG_PATH, gzip: false,
+      logger: m => onProgress?.(m)});
+    await w.setParameters({tessedit_pageseg_mode: OCR_PSM, preserve_interword_spaces: '1'});
+    return w;
+  })().catch(e => { ocrWorker = null; throw e; });
+  return ocrWorker;
+}
+async function readImageWithOcr(file, label) {
+  const bmp = await createImageBitmap(file);
+  const pick = await askCrop(bmp, label);
+  if (pick.skip) return null;
+  showNotice([`${label}: กำลังเตรียมภาพ`], true);
+  await new Promise(r => setTimeout(r, 30));
+  const canvas = preprocessForOcr(pick.source, pick.crop, {width: OCR_WIDTH});
+  const w = await getOcrWorker(m => {
+    if (m.status === 'loading language traineddata') showNotice([`${label}: กำลังโหลดชุดภาษา ${Math.round((m.progress || 0) * 100)}%`], true);
+    if (m.status === 'recognizing text') showNotice([`${label}: กำลังอ่าน ${Math.round(m.progress * 100)}%`], true);
   });
-  await tesseractLoad;
-  const res = await Tesseract.recognize(file, 'tha+eng', {logger: m => m.status === 'recognizing text' && onProgress?.(Math.round(m.progress * 100))});
-  // OCR text keeps order/bed/name on the same line; the parser only keeps the part from "อาหารทางสาย"
-  return res.data.text.split('\n').map(l => {
-    const t = l.trim(); const i = t.search(/อาหาร\s*ทาง\s*สาย/);
-    return i > 0 ? '0 ' + t.slice(i) : t;
+  const res = await w.recognize(canvas);
+  return fixOcrText(res.data.text);
+}
+
+/* crop step: drag a box over the report (header + food column), rotate if the photo is sideways */
+function askCrop(bmp, label) {
+  const panel = document.getElementById('cropPanel'), cv = document.getElementById('cropCanvas');
+  const ctx = cv.getContext('2d');
+  let source = bmp, box = null, drag = null;
+  const draw = () => {
+    cv.width = source.width; cv.height = source.height;
+    ctx.drawImage(source, 0, 0);
+    if (box) {
+      ctx.fillStyle = 'rgba(0,0,0,.45)';
+      ctx.fillRect(0, 0, cv.width, box.y); ctx.fillRect(0, box.y + box.h, cv.width, cv.height - box.y - box.h);
+      ctx.fillRect(0, box.y, box.x, box.h); ctx.fillRect(box.x + box.w, box.y, cv.width - box.x - box.w, box.h);
+      ctx.strokeStyle = '#22c55e'; ctx.lineWidth = Math.max(3, cv.width / 300); ctx.strokeRect(box.x, box.y, box.w, box.h);
+    }
+  };
+  const pt = e => { const r = cv.getBoundingClientRect(); return {x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height}; };
+  cv.onpointerdown = e => { cv.setPointerCapture(e.pointerId); drag = pt(e); box = null; e.preventDefault(); };
+  cv.onpointermove = e => { if (!drag) return; const q = pt(e);
+    box = {x: Math.max(0, Math.min(drag.x, q.x)), y: Math.max(0, Math.min(drag.y, q.y)), w: Math.abs(q.x - drag.x), h: Math.abs(q.y - drag.y)}; draw(); };
+  cv.onpointerup = () => { drag = null; if (box && (box.w < 20 || box.h < 20)) box = null; draw(); };
+  document.getElementById('cropTitle').textContent = label;
+  panel.hidden = false; draw(); panel.scrollIntoView({block: 'start'});
+  return new Promise(resolve => {
+    const done = v => { panel.hidden = true; ['cropRead', 'cropReset', 'cropRotate', 'cropSkip'].forEach(id => document.getElementById(id).onclick = null); resolve(v); };
+    document.getElementById('cropRead').onclick = () => done({source, crop: box && {x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h)}});
+    document.getElementById('cropReset').onclick = () => { box = null; draw(); };
+    document.getElementById('cropSkip').onclick = () => done({skip: true});
+    document.getElementById('cropRotate').onclick = () => {
+      const c = document.createElement('canvas'); c.width = source.height; c.height = source.width;
+      const x = c.getContext('2d'); x.translate(c.width, 0); x.rotate(Math.PI / 2); x.drawImage(source, 0, 0);
+      source = c; box = null; draw();
+    };
   });
 }
 const SAMPLE_ERR = {
@@ -495,27 +665,27 @@ async function handleFiles(list) {
   let arr = Array.from(list);
   const notes = [];
   if (files.some(f => f.sample)) { files = []; seenNames.clear(); }
-  if (arr.length > MAX_FILES) { notes.push(`เลือกมา ${arr.length} ไฟล์ ระบบอ่านเฉพาะ ${MAX_FILES} ไฟล์แรก`); arr = arr.slice(0, MAX_FILES); }
+  if (arr.length > MAX_FILES) { notes.push(`อ่านได้สูงสุด ${MAX_FILES} ไฟล์ต่อครั้ง`); arr = arr.slice(0, MAX_FILES); }
   const imgs = arr.filter(f => IMG_RE.test(f.name) || /^image\//.test(f.type));
   for (const [n, f] of arr.entries()) {
     try {
-      if (seenNames.has(f.name)) { notes.push(`${f.name} อัปโหลดไปแล้ว จึงข้ามไฟล์นี้`); continue; }
+      if (seenNames.has(f.name)) { notes.push(`${f.name}: อัปโหลดซ้ำ`); continue; }
       let lines, isImg = imgs.includes(f);
       if (isImg) {
         const k = imgs.indexOf(f) + 1;
         const sample = await getSample();
-        showNotice([`กำลังอ่านรูป ${k}/${imgs.length}: ${f.name} ${sample ? '(Claude กำลังอ่าน อาจใช้เวลาสักครู่)' : '(อ่านด้วย OCR ในเครื่อง)'}`], true);
-        lines = sample ? await readImageWithClaude(sample, f)
-                       : await readImageWithOcr(f, pct => showNotice([`กำลังอ่านรูป ${k}/${imgs.length}: ${f.name} ${pct}%`], true));
+        if (sample) showNotice([`กำลังอ่านรูป ${k}/${imgs.length}: ${f.name}`], true);
+        lines = sample ? await readImageWithClaude(sample, f) : await readImageWithOcr(f, `รูป ${k}/${imgs.length}: ${f.name}`);
+        if (!lines) { notes.push(`${f.name}: ข้าม`); continue; }
       } else {
         lines = /\.pdf$/i.test(f.name) ? await pdfLines(await f.arrayBuffer()) : csvLines(await f.text());
       }
       seenNames.add(f.name);
       const before = files.length;
       const entry = addParsed(isImg ? `รูปภาพ: ${f.name}` : f.name, lines, false, isImg);
-      if (!lines.some(l => /^0 /.test(l)) || (files.length > before && !entry.rows.length)) notes.push(`${f.name}: ไม่พบรายการ "อาหารทางสาย" ตรวจว่าเป็นรายงานรูปแบบเดียวกับตัวอย่าง`);
-      if (isImg && !entry.meta.printDate) notes.push(`${f.name}: อ่านวันที่จากรูปไม่ได้ ถ่ายให้เห็นหัวรายงานด้วย`);
-    } catch (e) { notes.push(`${f.name}: ${SAMPLE_ERR[e?.code] || 'เปิดไฟล์ไม่ได้ (' + (e?.message || e) + ')'}`); }
+      if (!parseReportLines(lines).rows.length) notes.push(`${f.name}: ไม่พบรายการอาหารทางสาย`);
+      if (isImg && !entry.meta.printDate) notes.push(`${f.name}: ไม่พบวันที่ กรุณาระบุในข้อ 1`);
+    } catch (e) { notes.push(`${f.name}: ${SAMPLE_ERR[e?.code] || 'เปิดไฟล์ไม่ได้'}`); }
   }
   view = 'all';
   showNotice(notes);
@@ -539,16 +709,17 @@ function fchip(f) { return f ? `<span class="f ${FCLS[f] || 'f-x'}">${esc(f)}</s
 function fmt(n) { return n.toLocaleString('th-TH'); }
 function flagsOf(r) {
   const fl = [];
-  if (r.product === WHEY) { if (r.assumed) fl.push(['warn', 'ไม่พบจำนวนมื้อ ใช้ 1']); }
+  if (r.product === WHEY) { if (r.assumed) fl.push(['warn', 'ไม่ระบุมื้อ (ใช้ 1)']); }
   else if (!r.volume) fl.push(['bad', 'ไม่พบปริมาณ']);
-  else if (r.assumed) fl.push(['warn', 'ไม่พบจำนวน feed ใช้ 4']);
-  if (r.whey && !r.wheyG) fl.push(['warn', 'ไม่พบกรัมเวย์']);
+  else if (r.assumed) fl.push(['warn', 'ไม่ระบุ feed (ใช้ 4)']);
+  if (r.whey && !r.wheyG) fl.push(['warn', 'ไม่ระบุกรัมเวย์']);
   else if (r.whey) fl.push(['info', 'เวย์ ' + r.wheyG + (r.wheyPerDay ? ' g/วัน' : ' g/มื้อ')]);
   if (!r.formula) fl.push(['bad', 'ไม่พบสูตร']);
-  if (r.mismatch) fl.push(['warn', 'ในวงเล็บเขียน ' + r.mismatch]);
+  if (r.mismatch) fl.push(['warn', 'สูตรในวงเล็บ ' + r.mismatch]);
   if (r.fuzzy) fl.push(['warn', 'ชื่อใกล้เคียง']);
   if (r.unnamed) fl.push(['info', 'ไม่ระบุชื่อ']);
-  if (r.fromImage) fl.push(['info', 'อ่านจากรูป']);
+  if (r.fromImage) fl.push(['warn', 'จากรูปภาพ']);
+  if (r.formula && !FORMULAS.includes(r.formula)) fl.push(['warn', 'สูตรผิดปกติ']);
   if (r.edited) fl.push(['ok', 'แก้ไขแล้ว']);
   return fl;
 }
@@ -569,7 +740,7 @@ function render() {
   renderFiles(); renderTabs();
   const rows = viewRows();
   const {agg} = aggregate(rows), unused = PRODUCT_IDS.filter(p => !agg[p]);
-  document.getElementById('emptyProducts').textContent = unused.length ? 'ไม่มีในข้อมูลนี้: ' + unused.join(', ') : '';
+  document.getElementById('emptyProducts').textContent = unused.length && rows.length ? 'ไม่มีในข้อมูลนี้: ' + unused.join(', ') : '';
   renderCards(rows); renderRows(rows);
 }
 
@@ -579,7 +750,7 @@ function renderFiles() {
   files.sort((a, b) => (a.date || 0) - (b.date || 0));
   const count = {}; files.forEach(f => count[dkey(f.date)] = (count[dkey(f.date)] || 0) + 1);
   const months = new Set(files.filter(f => f.date).map(f => f.date.getMonth() + '-' + f.date.getFullYear()));
-  t.innerHTML = '<thead><tr><th>ไฟล์</th><th>วันที่พิมพ์รายงาน</th><th>รายการอาหารวัน</th><th>วันที่ให้อาหาร (วัน เดือน ปี)</th><th class="n">รายการ</th><th>สถานะ</th></tr></thead><tbody>' +
+  t.innerHTML = '<thead><tr><th>ไฟล์</th><th>วันที่พิมพ์</th><th>วัน</th><th>วันที่ให้อาหาร</th><th class="n">รายการ</th><th>สถานะ</th></tr></thead><tbody>' +
     files.map(f => {
       const pd = f.meta.printDate;
       const st = [];
@@ -590,7 +761,7 @@ function renderFiles() {
       if (!st.length) st.push('<span class="chip ok">ถูกต้อง</span>');
       if (f.sample) st.push('<span class="chip info">ตัวอย่าง</span>');
       return `<tr><td>${esc(f.name)}</td><td class="num">${pd ? `${String(pd.d).padStart(2,'0')}/${String(pd.m).padStart(2,'0')}/${pd.y} ${esc(f.meta.printTime)}` : '–'}</td>
-        <td>${esc(f.meta.weekdayText || '–')}</td><td><strong>${thDate(f.date, true)}</strong></td><td class="n">${f.rows.length}</td><td>${st.join(' ')}</td></tr>`;
+        <td>${esc(f.meta.weekdayText || '–')}</td><td>${f.fromImage ? `<input class="date" type="date" data-file="${f.id}" value="${f.date ? f.date.getFullYear() + '-' + String(f.date.getMonth() + 1).padStart(2, '0') + '-' + String(f.date.getDate()).padStart(2, '0') : ''}" aria-label="วันที่ให้อาหาร"> ` : ''}<strong>${thDate(f.date, true)}</strong></td><td class="n">${f.rows.length}</td><td>${st.join(' ')}</td></tr>`;
     }).join('') + '</tbody>';
   const ds = files.filter(f => f.date).map(f => f.date);
   let note = '';
@@ -630,7 +801,7 @@ function renderCards(rows) {
   const {agg, vol} = aggregate(rows);
   const used = PRODUCT_IDS.filter(p => agg[p]);
   const wheyCard = renderWhey(rows);
-  if (!used.length && !wheyCard) { el.innerHTML = '<p class="empty-list">อัปโหลดไฟล์เพื่อดูตาราง</p>'; return; }
+  if (!used.length && !wheyCard) { el.innerHTML = '<p class="empty-list">ยังไม่มีข้อมูล</p>'; return; }
   el.innerHTML = used.map(p => {
     const fl = formulasIn(rows.filter(r => r.product === p)).filter(f => agg[p][f]).concat(agg[p]['?'] ? ['?'] : []);
     const vols = Object.keys(vol[p]).map(Number).filter(v => Object.values(vol[p][v]).some(n => n > 0)).sort((a, b) => a - b);
@@ -664,7 +835,7 @@ function renderWhey(rows) {
     <thead><tr><th>ปริมาณ</th><th class="n">ราย</th><th class="n">มื้อ</th><th class="n">รวม g</th></tr></thead><tbody>` +
     gs.map(x => `<tr><td class="num">${esc(x.label)}</td><td class="n">${x.pts}</td><td class="n">${x.meals || '–'}</td><td class="n"><strong>${fmt(x.grams)}</strong></td></tr>`).join('') +
     `</tbody><tfoot><tr><td colspan="3">รวม</td><td class="n">${fmt(tot.grams)} g</td></tr></tfoot></table></div>
-    <p class="small" style="margin:0;padding:8px 14px">แยกจาก 11 ชนิด ${only ? `· ${only} รายสั่งเวย์อย่างเดียว ไม่นับเป็นถุงอาหาร` : ''} · รายที่เติมเวย์ในอาหารทางสาย นับมื้อตามจำนวน feed</p></div>`;
+    <p class="small" style="margin:0;padding:8px 14px">ไม่รวมใน 11 ชนิด</p></div>`;
 }
 const EGG_PROT = 7;                                   // g protein per egg
 const toWhey = g => Math.round(g * 12 / 11 * 10) / 10; // protein 11 g = whey 12 g
@@ -686,7 +857,7 @@ function renderEgg(rows) {
     <thead><tr><th>ปริมาณ</th><th class="n">ราย</th><th class="n">มื้อ</th><th class="n">รวมฟอง</th><th class="n">โปรตีน (g)</th><th class="n">เทียบเวย์ (g)</th></tr></thead><tbody>` +
     gs.map(x => `<tr><td class="num">${esc(x.label)}</td><td class="n">${x.pts}</td><td class="n">${x.meals || '–'}</td><td class="n"><strong>${fmt(x.eggs)}</strong></td><td class="n">${fmt(x.eggs * EGG_PROT)}</td><td class="n">${fmt(toWhey(x.eggs * EGG_PROT))}</td></tr>`).join('') +
     `</tbody><tfoot><tr><td colspan="3">รวม</td><td class="n">${fmt(tot.eggs)} ฟอง</td><td class="n">${fmt(tot.eggs * EGG_PROT)} g</td><td class="n">${fmt(toWhey(tot.eggs * EGG_PROT))} g</td></tr></tfoot></table></div>
-    <p class="small" style="margin:0;padding:8px 14px">รวมไข่ ไข่ขาว และโปรตีนไข่ขาว · ฟองต่อมื้อ × จำนวนถุงต่อวัน · ถ้าเขียนต่อวันใช้ตามนั้น · ไข่ 1 ฟอง = โปรตีน 7 g · โปรตีน 11 g = เวย์ 12 g</p></div>`;
+    <p class="small" style="margin:0;padding:8px 14px">ไข่ 1 ฟอง = โปรตีน 7 g · โปรตีน 11 g = เวย์ 12 g</p></div>`;
 }
 
 function renderRows(rows) {
@@ -695,8 +866,8 @@ function renderRows(rows) {
   document.getElementById('flagCount').textContent = rows.filter(needsCheck).length;
   const list = only ? rows.filter(needsCheck) : rows;
   const multi = view === 'all' && files.length > 1;
-  if (!list.length) { t.innerHTML = `<tr><td class="empty-list">${rows.length ? 'ไม่มีรายการที่ต้องตรวจ' : 'ยังไม่มีข้อมูล'}</td></tr>`; return; }
-  t.innerHTML = `<thead><tr>${multi ? '<th>วัน</th>' : ''}<th>ตึก</th><th>สูตร</th><th>รายการอาหาร (ชี้เพื่อดูข้อความเต็ม)</th><th>ชนิด</th><th class="n">ml/ถุง</th><th class="n">ถุง</th><th class="n">รวม ml</th><th>หมายเหตุ</th></tr></thead><tbody>` +
+  if (!list.length) { t.innerHTML = `<tr><td class="empty-list">${rows.length ? 'ไม่มีรายการที่ต้องตรวจสอบ' : 'ยังไม่มีข้อมูล'}</td></tr>`; return; }
+  t.innerHTML = `<thead><tr>${multi ? '<th>วัน</th>' : ''}<th>ตึก</th><th>สูตร</th><th>รายการอาหาร</th><th>ชนิด</th><th class="n">ml/ถุง</th><th class="n">ถุง</th><th class="n">รวม ml</th><th>หมายเหตุ</th></tr></thead><tbody>` +
     list.map(r => `<tr class="${needsCheck(r) ? 'flag' : ''}${r.egg ? ' has-sub' : ''}" data-key="${esc(r.key)}">
       ${multi ? `<td>${r._file.date ? esc(thDate(r._file.date, true).replace(/ \d{4}$/, '')) : esc(r._file.name)}</td>` : ''}
       <td>${esc(r.ward)}</td><td><select data-f="formula" aria-label="สูตร" class="${FCLS[r.formula] || 'f-x'}">${(FORMULAS.includes(r.formula) || !r.formula ? FORMULAS : FORMULAS.concat(r.formula)).map(f => `<option value="${f}"${f === r.formula ? ' selected' : ''}>${f}</option>`).join('')}${r.formula ? '' : '<option value="" selected>?</option>'}</select></td>
@@ -740,6 +911,13 @@ document.getElementById('file').addEventListener('change', e => { handleFiles(e.
 ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
 document.getElementById('btnClear').addEventListener('click', () => { files = []; seenNames.clear(); view = 'all'; showNotice([]); render(); });
+document.getElementById('tblFiles').addEventListener('change', e => {
+  const f = files.find(x => x.id === e.target.dataset.file); if (!f || !e.target.value) return;
+  const [y, m, d] = e.target.value.split('-').map(Number);
+  f.date = new Date(y, m - 1, d); f.meta.weekdayText = TH_DAYS[f.date.getDay()]; f.meta.weekday = f.date.getDay();
+  f.meta.printDate ??= {d, m, y};
+  render();
+});
 document.getElementById('onlyFlag').addEventListener('change', () => renderRows(viewRows()));
 document.getElementById('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { view = b.dataset.view; render(); } });
 document.getElementById('tblRows').addEventListener('change', e => {
@@ -757,16 +935,14 @@ document.getElementById('tblRows').addEventListener('change', e => {
 });
 document.getElementById('btnCopy').addEventListener('click', async () => {
   const txt = summaryText();
-  try { await navigator.clipboard.writeText(txt); showNotice(['คัดลอกตารางสรุปแล้ว วางใน Excel ได้ทันที'], true); }
+  try { await navigator.clipboard.writeText(txt); showNotice(['คัดลอกแล้ว'], true); }
   catch (e) {
     const ta = document.createElement('textarea'); ta.value = txt; ta.style.cssText = 'width:100%;height:160px;font-family:var(--mono)';
-    const n = document.getElementById('notice'); n.hidden = false; n.className = 'msg info'; n.textContent = 'คัดลอกอัตโนมัติไม่ได้ กด Ctrl+C เพื่อคัดลอกข้อความด้านล่าง'; n.appendChild(ta); ta.select();
+    const n = document.getElementById('notice'); n.hidden = false; n.className = 'msg info'; n.textContent = 'กด Ctrl+C เพื่อคัดลอก'; n.appendChild(ta); ta.select();
   }
 });
 
 /* example data so the page opens in a working state */
-SAMPLE.forEach(s => addParsed(s.name, s.lines, true));
-showNotice(['กำลังแสดงข้อมูลตัวอย่างจาก Report19–21 เมื่ออัปโหลดไฟล์ของคุณ ตัวอย่างจะถูกแทนที่'], true);
 render();
 </script>
 </body></html>
